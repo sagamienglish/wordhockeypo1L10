@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Word Hockey Arcade - Final</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #111;
+            font-family: 'Arial Black', sans-serif;
+            overflow: hidden;
+            touch-action: none; /* ブラウザのスクロール等を無効化 */
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            background: radial-gradient(circle, #2a2a2a 0%, #000 100%);
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        /* UIレイヤー */
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+
+        /* メニューに戻るボタン（ゲーム中のみ表示） */
+        #back-to-menu-btn {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            padding: 10px 20px;
+            font-size: 14px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid #fff;
+            color: #fff;
+            border-radius: 20px;
+            cursor: pointer;
+            pointer-events: auto;
+            display: none; /* 初期は非表示 */
+            z-index: 20;
+        }
+        #back-to-menu-btn:active { background: rgba(255, 255, 255, 0.4); }
+
+        .message-box {
+            background: rgba(0, 0, 0, 0.9);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            color: #fff;
+            border: 4px solid #00d2ff;
+            box-shadow: 0 0 30px #00d2ff;
+            pointer-events: auto;
+            max-width: 80%;
+            display: none; /* 初期は非表示 */
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        
+        #start-screen { display: block; } /* 初期表示 */
+
+        h1 { margin: 0 0 20px; font-size: 2.5rem; color: #00d2ff; text-shadow: 0 0 10px #00d2ff; }
+        p { font-size: 1rem; line-height: 1.6; margin-bottom: 20px; color: #ccc; }
+        .highlight { color: #ffcc00; font-weight: bold; }
+        
+        button.main-btn {
+            background: linear-gradient(90deg, #00d2ff, #0077ff);
+            border: none;
+            padding: 15px 50px;
+            font-size: 1.5rem;
+            color: white;
+            font-weight: bold;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 5px 15px rgba(0, 210, 255, 0.4);
+            transition: transform 0.1s;
+            margin-top: 10px;
+        }
+        button.main-btn:active { transform: scale(0.95); }
+
+        /* 勝利数表示エリア */
+        .stats-area {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #444;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+        .win-counts {
+            display: flex;
+            gap: 30px;
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+        .win-blue { color: #00d2ff; }
+        .win-red { color: #ff0055; }
+        
+        #reset-stats-btn {
+            background: #444;
+            border: 1px solid #666;
+            color: #aaa;
+            padding: 5px 15px;
+            border-radius: 5px;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+        #reset-stats-btn:active { background: #555; }
+
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+    
+    <!-- 左上メニューボタン -->
+    <button id="back-to-menu-btn">← MENU</button>
+    
+    <div id="ui-layer">
+        <!-- スタート画面 -->
+        <div id="start-screen" class="message-box">
+            <h1>Word Hockey<br><span style="font-size:0.6em">Bonus Match</span></h1>
+            <p>
+                10点先取 または 60秒で終了！<br>
+                ゴール後は<span class="highlight">早押しボーナスクイズ</span>！<br>
+                正解すると+1点！
+            </p>
+            <button id="start-btn" class="main-btn">GAME START</button>
+
+            <!-- 勝利数記録 -->
+            <div class="stats-area">
+                <div class="win-counts">
+                    <span class="win-blue">BLUE: <span id="wins-blue">0</span>勝</span>
+                    <span class="win-red">RED: <span id="wins-red">0</span>勝</span>
+                </div>
+                <button id="reset-stats-btn">勝利数をリセット</button>
+            </div>
+        </div>
+
+        <!-- ゲームオーバー画面 -->
+        <div id="gameover-screen" class="message-box">
+            <h1 id="winner-text">BLUE WINS!</h1>
+            <p id="final-score">5 - 3</p>
+            <button id="retry-btn" class="main-btn">PLAY AGAIN</button>
+            <br><br>
+            <button id="menu-return-btn" style="background:none; border:1px solid #fff; color:#fff; padding:10px 20px; border-radius:20px; cursor:pointer;">MENU</button>
+        </div>
+    </div>
+</div>
+
+<script>
+/**
+ * 簡易サウンドシンセサイザー
+ */
+const AudioContext = window.AudioContext || window.webkitAudioContext;
+let audioCtx;
+
+function initAudio() {
+    if (!audioCtx) audioCtx = new AudioContext();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+
+    if (type === 'wall') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(100, now);
+        osc.frequency.exponentialRampToValueAtTime(40, now + 0.1);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        osc.start(now);
+        osc.stop(now + 0.1);
+    } 
+    else if (type === 'correct') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(500, now);
+        osc.frequency.linearRampToValueAtTime(1000, now + 0.1);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+        osc.start(now);
+        osc.stop(now + 0.3);
+    }
+    else if (type === 'goal') {
+        const notes = [440, 554, 659, 880]; 
+        notes.forEach((freq, i) => {
+            const o = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            o.connect(g);
+            g.connect(audioCtx.destination);
+            o.type = 'square';
+            o.frequency.value = freq;
+            g.gain.setValueAtTime(0.1, now + i * 0.08);
+            g.gain.exponentialRampToValueAtTime(0.01, now + i * 0.08 + 0.3);
+            o.start(now + i * 0.08);
+            o.stop(now + i * 0.08 + 0.3);
+        });
+    }
+    else if (type === 'speedup') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(200, now);
+        osc.frequency.linearRampToValueAtTime(600, now + 0.2);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+        osc.start(now);
+        osc.stop(now + 0.2);
+    }
+    else if (type === 'bonus_win') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.linearRampToValueAtTime(1760, now + 0.2);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+        osc.start(now);
+        osc.stop(now + 0.4);
+    }
+    else if (type === 'bonus_wrong') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.linearRampToValueAtTime(100, now + 0.2);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+        osc.start(now);
+        osc.stop(now + 0.2);
+    }
+}
+
+function speakWord(text) {
+    if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const uttr = new SpeechSynthesisUtterance(text);
+        uttr.lang = 'en-US';
+        uttr.rate = 1.0;
+        window.speechSynthesis.speak(uttr);
+    }
+}
+
+/**
+ * データセット
+ */
+const RAW_WORD_LIST = [
+    { en: "happen to do", ja: "偶然…する" },
+    { en: "strongly", ja: "強く" },
+    { en: "tribe", ja: "種族, 民族" },
+    { en: "grade", ja: "学年" },
+    { en: "fit", ja: "合う" },
+    { en: "bully", ja: "いじめる" },
+    { en: "come true", ja: "実現する" },
+    { en: "ethnic", ja: "民族の" },
+    { en: "childhood", ja: "幼少期, 子どもの頃" },
+    { en: "violent", ja: "暴力的な" },
+    { en: "continent", ja: "大陸" },
+    { en: "avoid", ja: "避ける" },
+    { en: "might", ja: "…かもしれない" },
+    { en: "behave", ja: "振る舞う" },
+    { en: "make-up", ja: "化粧" },
+    { en: "attractive", ja: "魅力的な" },
+    { en: "think of A as B", ja: "AをBとしてとらえる" },
+    { en: "in addition", ja: "加えて, さらに" },
+    { en: "pass on to …", ja: "…に伝える" },
+    { en: "subject", ja: "被写体, 対象" },
+    { en: "Ethiopia", ja: "エチオピア" },
+    { en: "luckily", ja: "幸運にも" },
+    { en: "program", ja: "番組" },
+    { en: "expect", ja: "予期する, 期待する" },
+    { en: "Amazon", ja: "アマゾン川" },
+    { en: "region", ja: "地域" },
+    { en: "feature", ja: "特集する, 特徴づける" },
+    { en: "A as well as B", ja: "BだけでなくAも" }
+];
+
+const COLORS = {
+    bg: '#1a1a1a',
+    lines: '#444',
+    puck: '#fff',
+    p1: '#00d2ff',
+    p2: '#ff0055',
+    text: '#fff',
+    correct: '#00ff00',
+    bonusBg: 'rgba(0,0,0,0.85)'
+};
+
+class Game {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        
+        this.width = window.innerWidth;
+        this.height = window.innerHeight;
+        
+        // ゲーム状態管理
+        this.state = 'START'; // START, PLAY, BONUS, GAMEOVER
+        this.score = { p1: 0, p2: 0 };
+        this.timeLeft = 60;
+        this.lastTime = 0;
+        
+        // 勝利数記録
+        this.winStats = { blue: 0, red: 0 };
+        this.loadStats();
+        
+        this.currentWord = null;
+        this.bonusOptions = [];
+        this.bonusWinner = null;
+        
+        this.goalSize = 250;
+        this.rallyCount = 0;
+
+        // パック
+        this.puck = {
+            x: this.width / 2, y: this.height / 2,
+            vx: 0, vy: 0,
+            radius: 30,
+            mass: 1,
+            flashTimer: 0
+        };
+
+        // プレイヤー
+        this.paddles = [
+            { x: 150, y: this.height / 2, radius: 40, orbitRadius: 65, angle: 0, color: COLORS.p1, targetX: 150, targetY: this.height / 2, satellites: [] },
+            { x: this.width - 150, y: this.height / 2, radius: 40, orbitRadius: 65, angle: Math.PI, color: COLORS.p2, targetX: this.width - 150, targetY: this.height / 2, satellites: [] }
+        ];
+
+        window.addEventListener('resize', () => this.resize());
+        this.setupControls();
+        
+        // ボタンイベント
+        document.getElementById('start-btn').addEventListener('click', () => this.startGame());
+        document.getElementById('retry-btn').addEventListener('click', () => this.startGame());
+        document.getElementById('back-to-menu-btn').addEventListener('click', () => this.backToMenu());
+        document.getElementById('menu-return-btn').addEventListener('click', () => this.backToMenu());
+        
+        // 統計リセットボタン
+        document.getElementById('reset-stats-btn').addEventListener('click', () => {
+            if(confirm('勝利数をリセットしますか？')) {
+                this.resetStats();
+            }
+        });
+
+        this.resize();
+        this.pickNewWord();
+        requestAnimationFrame(t => this.loop(t));
+    }
+
+    // --- 勝利数記録関連 ---
+    loadStats() {
+        const blue = localStorage.getItem('wordHockey_blueWins');
+        const red = localStorage.getItem('wordHockey_redWins');
+        if (blue) this.winStats.blue = parseInt(blue, 10);
+        if (red) this.winStats.red = parseInt(red, 10);
+        this.updateStatsDisplay();
+    }
+
+    saveStats() {
+        localStorage.setItem('wordHockey_blueWins', this.winStats.blue);
+        localStorage.setItem('wordHockey_redWins', this.winStats.red);
+        this.updateStatsDisplay();
+    }
+
+    resetStats() {
+        this.winStats = { blue: 0, red: 0 };
+        this.saveStats();
+    }
+
+    updateStatsDisplay() {
+        document.getElementById('wins-blue').textContent = this.winStats.blue;
+        document.getElementById('wins-red').textContent = this.winStats.red;
+    }
+    // -------------------
+
+    startGame() {
+        initAudio();
+        document.getElementById('start-screen').style.display = 'none';
+        document.getElementById('gameover-screen').style.display = 'none';
+        document.getElementById('back-to-menu-btn').style.display = 'block'; // メニューボタン表示
+        
+        this.state = 'PLAY';
+        this.score = { p1: 0, p2: 0 };
+        this.timeLeft = 60;
+        this.rallyCount = 0;
+        this.lastTime = performance.now();
+        
+        this.resetPuck(true);
+        
+        if (document.documentElement.requestFullscreen) {
+            document.documentElement.requestFullscreen().catch(e => console.log(e));
+        }
+    }
+
+    backToMenu() {
+        this.state = 'START';
+        document.getElementById('start-screen').style.display = 'block';
+        document.getElementById('gameover-screen').style.display = 'none';
+        document.getElementById('back-to-menu-btn').style.display = 'none';
+        this.resize(); // パドル位置リセットなど
+    }
+
+    endGame() {
+        this.state = 'GAMEOVER';
+        document.getElementById('back-to-menu-btn').style.display = 'none';
+
+        const winText = document.getElementById('winner-text');
+        const scoreText = document.getElementById('final-score');
+        
+        if (this.score.p1 > this.score.p2) {
+            winText.textContent = "BLUE WINS!";
+            winText.style.color = COLORS.p1;
+            this.winStats.blue++;
+        } else if (this.score.p2 > this.score.p1) {
+            winText.textContent = "RED WINS!";
+            winText.style.color = COLORS.p2;
+            this.winStats.red++;
+        } else {
+            winText.textContent = "DRAW!";
+            winText.style.color = "#fff";
+        }
+        this.saveStats(); // 記録保存
+        
+        scoreText.textContent = `${this.score.p1} - ${this.score.p2}`;
+        document.getElementById('gameover-screen').style.display = 'block';
+    }
+
+    resize() {
+        this.width = window.innerWidth;
+        this.height = window.innerHeight;
+        this.canvas.width = this.width;
+        this.canvas.height = this.height;
+        this.goalSize = Math.max(150, this.height * 0.3);
+
+        if (this.state === 'START' || this.state === 'GAMEOVER') {
+            this.paddles[0].x = this.width * 0.15;
+            this.paddles[0].y = this.height / 2;
+            this.paddles[1].x = this.width * 0.85;
+            this.paddles[1].y = this.height / 2;
+        }
+    }
+
+    pickNewWord() {
+        const target = RAW_WORD_LIST[Math.floor(Math.random() * RAW_WORD_LIST.length)];
+        const otherWords = RAW_WORD_LIST.filter(w => w.en !== target.en);
+        const shuffled = [...otherWords].sort(() => 0.5 - Math.random());
+        const dummies = shuffled.slice(0, 2).map(w => w.ja);
+        
+        this.currentWord = { en: target.en, ja: target.ja, dummies: dummies };
+        
+        this.paddles.forEach(p => {
+            let choices = [
+                { text: target.ja, isCorrect: true },
+                { text: dummies[0], isCorrect: false },
+                { text: dummies[1], isCorrect: false }
+            ];
+            choices.sort(() => 0.5 - Math.random());
+            p.satellites = choices.map((c, i) => ({
+                ...c,
+                offsetAngle: i * (Math.PI * 2 / 3)
+            }));
+        });
+    }
+
+    setupBonusRound() {
+        this.state = 'BONUS';
+        this.bonusWinner = null;
+        
+        // ボーナス選択肢の生成 (左側P1用、右側P2用)
+        this.bonusOptions = [];
+        const btnW = 200;
+        const btnH = 60;
+        const gap = 20;
+        
+        let choices = [
+            { text: this.currentWord.ja, isCorrect: true },
+            { text: this.currentWord.dummies[0], isCorrect: false },
+            { text: this.currentWord.dummies[1], isCorrect: false }
+        ];
+
+        // 中央エリアを避けるため、Y座標を調整
+        // 上部に結果表示、中央に英単語、下部にボタンという配置にする
+        
+        const startY = this.height / 2 + 50; // 中央より下からボタン開始
+
+        // P1用 (左側)
+        let p1Choices = [...choices].sort(() => 0.5 - Math.random());
+        p1Choices.forEach((c, i) => {
+            this.bonusOptions.push({
+                player: 'p1',
+                text: c.text,
+                isCorrect: c.isCorrect,
+                x: this.width * 0.15 - btnW/2,
+                y: startY + i * (btnH + gap), 
+                w: btnW, h: btnH,
+                active: true
+            });
+        });
+
+        // P2用 (右側)
+        let p2Choices = [...choices].sort(() => 0.5 - Math.random());
+        p2Choices.forEach((c, i) => {
+            this.bonusOptions.push({
+                player: 'p2',
+                text: c.text,
+                isCorrect: c.isCorrect,
+                x: this.width * 0.85 - btnW/2,
+                y: startY + i * (btnH + gap),
+                w: btnW, h: btnH,
+                active: true
+            });
+        });
+
+        speakWord(this.currentWord.en);
+    }
+
+    resetPuck(newGame = false) {
+        this.puck.x = this.width / 2;
+        this.puck.y = this.height / 2;
+        this.puck.vx = 0;
+        this.puck.vy = 0;
+        this.rallyCount = 0;
+
+        if (!newGame) this.pickNewWord();
+        else this.pickNewWord();
+
+        setTimeout(() => {
+            if (this.state !== 'PLAY') return;
+            const speed = 3.2; 
+            const finalDir = (Math.random() > 0.5 ? 1 : -1);
+            this.puck.vx = finalDir * speed;
+            this.puck.vy = (Math.random() - 0.5) * speed;
+        }, 1000);
+    }
+
+    setupControls() {
+        const handlePaddleMove = (x, y, isLeft) => {
+            if (this.state !== 'PLAY') return; 
+            
+            const margin = this.paddles[0].orbitRadius + 10;
+            const centerLine = this.width / 2;
+            if (isLeft) {
+                const cx = Math.max(margin, Math.min(x, centerLine - margin));
+                const cy = Math.max(margin, Math.min(y, this.height - margin));
+                this.paddles[0].targetX = cx;
+                this.paddles[0].targetY = cy;
+            } else {
+                const cx = Math.max(centerLine + margin, Math.min(x, this.width - margin));
+                const cy = Math.max(margin, Math.min(y, this.height - margin));
+                this.paddles[1].targetX = cx;
+                this.paddles[1].targetY = cy;
+            }
+        };
+
+        const checkBonusClick = (x, y) => {
+            if (this.state !== 'BONUS') return;
+
+            for (let btn of this.bonusOptions) {
+                if (!btn.active) continue;
+                
+                if (x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h) {
+                    if (btn.isCorrect) {
+                        playSound('bonus_win');
+                        this.bonusWinner = btn.player;
+                        this.score[btn.player]++; 
+                        
+                        setTimeout(() => {
+                            if (this.state === 'BONUS') { // 画面遷移してなければ
+                                this.state = 'PLAY';
+                                this.resetPuck();
+                            }
+                        }, 1500);
+                        
+                        this.bonusOptions.forEach(b => b.active = false);
+                    } else {
+                        playSound('bonus_wrong');
+                        btn.active = false; 
+                    }
+                    return; 
+                }
+            }
+        };
+
+        const handleInput = (e) => {
+            e.preventDefault();
+            const touches = e.touches || [{ clientX: e.clientX, clientY: e.clientY }];
+            
+            if (e.type === 'touchstart' || e.type === 'mousedown') {
+                for (let i = 0; i < touches.length; i++) {
+                    const t = touches[i];
+                    checkBonusClick(t.clientX, t.clientY);
+                }
+            }
+
+            for (let i = 0; i < touches.length; i++) {
+                const t = touches[i];
+                const isLeft = t.clientX < this.width / 2;
+                handlePaddleMove(t.clientX, t.clientY, isLeft);
+            }
+        };
+
+        this.canvas.addEventListener('touchmove', handleInput, { passive: false });
+        this.canvas.addEventListener('touchstart', handleInput, { passive: false });
+        this.canvas.addEventListener('mousedown', handleInput);
+        this.canvas.addEventListener('mousemove', (e) => {
+            if(e.buttons > 0) handleInput(e);
+        });
+    }
+
+    update(dt) {
+        if (this.state === 'GAMEOVER' || this.state === 'START') return;
+
+        if (this.state === 'PLAY' || this.state === 'BONUS') {
+            this.timeLeft -= dt;
+            if (this.timeLeft <= 0) {
+                this.timeLeft = 0;
+                this.endGame();
+                return;
+            }
+            if (this.score.p1 >= 10 || this.score.p2 >= 10) {
+                this.endGame();
+                return;
+            }
+        }
+
+        if (this.state === 'BONUS') return;
+        if (this.state !== 'PLAY') return;
+
+        // --- PLAY中の物理演算 ---
+        this.paddles.forEach(p => {
+            const ease = 0.15;
+            p.x += (p.targetX - p.x) * ease;
+            p.y += (p.targetY - p.y) * ease;
+            p.angle += 0.005;
+
+            p.satellites.forEach(sat => {
+                const theta = p.angle + sat.offsetAngle;
+                sat.x = p.x + Math.cos(theta) * p.orbitRadius;
+                sat.y = p.y + Math.sin(theta) * p.orbitRadius;
+                sat.radius = 28;
+            });
+        });
+
+        this.puck.x += this.puck.vx;
+        this.puck.y += this.puck.vy;
+
+        let wallHit = false;
+        if (this.puck.y - this.puck.radius < 0) {
+            this.puck.y = this.puck.radius;
+            this.puck.vy *= -1;
+            wallHit = true;
+        } else if (this.puck.y + this.puck.radius > this.height) {
+            this.puck.y = this.height - this.puck.radius;
+            this.puck.vy *= -1;
+            wallHit = true;
+        }
+        
+        const goalTop = (this.height - this.goalSize) / 2;
+        const goalBottom = (this.height + this.goalSize) / 2;
+
+        if (this.puck.x - this.puck.radius < 0) {
+            if (this.puck.y > goalTop && this.puck.y < goalBottom) {
+                if (this.puck.x < -40) {
+                    this.score.p2++;
+                    playSound('goal');
+                    this.setupBonusRound();
+                }
+            } else {
+                this.puck.x = this.puck.radius;
+                this.puck.vx *= -1;
+                wallHit = true;
+            }
+        }
+        if (this.puck.x + this.puck.radius > this.width) {
+            if (this.puck.y > goalTop && this.puck.y < goalBottom) {
+                if (this.puck.x > this.width + 40) {
+                    this.score.p1++;
+                    playSound('goal');
+                    this.setupBonusRound();
+                }
+            } else {
+                this.puck.x = this.width - this.puck.radius;
+                this.puck.vx *= -1;
+                wallHit = true;
+            }
+        }
+
+        if (wallHit) playSound('wall');
+
+        this.paddles.forEach(p => {
+            p.satellites.forEach(sat => {
+                const dx = this.puck.x - sat.x;
+                const dy = this.puck.y - sat.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const minDist = this.puck.radius + sat.radius;
+
+                if (dist < minDist) {
+                    if (sat.isCorrect) {
+                        playSound('correct');
+                        this.rallyCount++;
+                        let speedMultiplier = 1.0;
+                        if (this.rallyCount > 0 && this.rallyCount % 2 === 0) {
+                            speedMultiplier = 1.1;
+                            playSound('speedup');
+                        }
+
+                        const angle = Math.atan2(dy, dx);
+                        const push = minDist - dist + 2;
+                        this.puck.x += Math.cos(angle) * push;
+                        this.puck.y += Math.sin(angle) * push;
+
+                        const currentSpeed = Math.sqrt(this.puck.vx**2 + this.puck.vy**2);
+                        const bounceSpeed = Math.max(currentSpeed * 1.05 * speedMultiplier, 5); 
+                        
+                        this.puck.vx = Math.cos(angle) * bounceSpeed;
+                        this.puck.vy = Math.sin(angle) * bounceSpeed;
+
+                        this.puck.flashTimer = 10;
+                    }
+                }
+            });
+        });
+
+        if(this.puck.flashTimer > 0) this.puck.flashTimer--;
+    }
+
+    draw() {
+        this.ctx.fillStyle = COLORS.bg;
+        this.ctx.fillRect(0, 0, this.width, this.height);
+        this.drawCourt();
+
+        if (this.state === 'BONUS') {
+            this.drawBonusScreen();
+        } else {
+            this.paddles.forEach(p => this.drawPaddle(p));
+            this.drawPuck();
+        }
+
+        this.drawUI();
+    }
+
+    drawBonusScreen() {
+        this.ctx.fillStyle = COLORS.bonusBg;
+        this.ctx.fillRect(0, 0, this.width, this.height);
+
+        this.ctx.textAlign = "center";
+        this.ctx.textBaseline = "middle";
+        
+        // Bonus! Title (上部)
+        this.ctx.font = "bold italic 40px Arial";
+        this.ctx.fillStyle = "#ffcc00";
+        this.ctx.fillText("BONUS CHANCE!", this.width/2, 80);
+
+        // 英単語 (中央少し上)
+        this.ctx.font = "bold 60px Arial";
+        this.ctx.fillStyle = "#00d2ff";
+        this.ctx.fillText(this.currentWord.en, this.width/2, this.height/2 - 50);
+
+        // 結果表示 (最上部で被らないように)
+        if (this.bonusWinner) {
+            this.ctx.font = "bold 50px Arial";
+            this.ctx.fillStyle = this.bonusWinner === 'p1' ? COLORS.p1 : COLORS.p2;
+            const text = this.bonusWinner === 'p1' ? "BLUE GETS +1 !" : "RED GETS +1 !";
+            // タイトルのさらに上、またはタイトルの下に配置
+            this.ctx.fillText(text, this.width/2, 140);
+        }
+
+        // 選択肢ボタン描画
+        this.bonusOptions.forEach(btn => {
+            const isActive = btn.active && !this.bonusWinner; 
+            
+            this.ctx.beginPath();
+            this.ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 10);
+            
+            if (this.bonusWinner) {
+                 if (btn.isCorrect) this.ctx.fillStyle = "#00aa00";
+                 else this.ctx.fillStyle = "#333";
+            } else {
+                if (isActive) {
+                     this.ctx.strokeStyle = btn.player === 'p1' ? COLORS.p1 : COLORS.p2;
+                     this.ctx.lineWidth = 3;
+                     this.ctx.fillStyle = "#222";
+                     this.ctx.stroke();
+                } else {
+                    this.ctx.fillStyle = "#111"; 
+                }
+            }
+            this.ctx.fill();
+
+            this.ctx.fillStyle = isActive || (this.bonusWinner && btn.isCorrect) ? "#fff" : "#555";
+            this.ctx.font = "bold 18px Arial";
+            this.ctx.fillText(btn.text, btn.x + btn.w/2, btn.y + btn.h/2);
+        });
+    }
+
+    drawUI() {
+        // スコア表示
+        this.ctx.font = "bold 60px Arial";
+        this.ctx.textAlign = "center";
+        this.ctx.textBaseline = "top";
+        
+        this.ctx.fillStyle = COLORS.p1;
+        this.ctx.fillText(this.score.p1, this.width / 2 - 120, 20);
+        
+        this.ctx.fillStyle = COLORS.p2;
+        this.ctx.fillText(this.score.p2, this.width / 2 + 120, 20);
+
+        this.ctx.fillStyle = "#555";
+        this.ctx.fillText("-", this.width / 2, 20);
+
+        // タイマー表示
+        const seconds = Math.ceil(this.timeLeft);
+        this.ctx.font = "bold 40px Arial";
+        this.ctx.fillStyle = seconds <= 10 ? "#ff3333" : "#fff";
+        this.ctx.textBaseline = "bottom";
+        this.ctx.fillText(`TIME: ${seconds}`, this.width / 2, this.height - 20);
+    }
+
+    drawCourt() {
+        this.ctx.strokeStyle = COLORS.lines;
+        this.ctx.lineWidth = 4;
+        this.ctx.beginPath();
+        this.ctx.moveTo(this.width / 2, 0);
+        this.ctx.lineTo(this.width / 2, this.height);
+        this.ctx.stroke();
+
+        this.ctx.beginPath();
+        this.ctx.arc(this.width / 2, this.height / 2, 100, 0, Math.PI * 2);
+        this.ctx.stroke();
+
+        const gT = (this.height - this.goalSize) / 2;
+        const gB = (this.height + this.goalSize) / 2;
+        this.ctx.lineWidth = 10;
+        
+        this.ctx.strokeStyle = COLORS.p1;
+        this.ctx.shadowBlur = 10; this.ctx.shadowColor = COLORS.p1;
+        this.ctx.beginPath();
+        this.ctx.moveTo(0,0); this.ctx.lineTo(0, gT);
+        this.ctx.moveTo(0, gB); this.ctx.lineTo(0, this.height);
+        this.ctx.stroke();
+
+        this.ctx.strokeStyle = COLORS.p2;
+        this.ctx.shadowBlur = 10; this.ctx.shadowColor = COLORS.p2;
+        this.ctx.beginPath();
+        this.ctx.moveTo(this.width,0); this.ctx.lineTo(this.width, gT);
+        this.ctx.moveTo(this.width, gB); this.ctx.lineTo(this.width, this.height);
+        this.ctx.stroke();
+        
+        this.ctx.shadowBlur = 0;
+    }
+
+    drawPaddle(p) {
+        this.ctx.beginPath();
+        this.ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        this.ctx.fillStyle = "rgba(255,255,255,0.1)"; 
+        this.ctx.strokeStyle = p.color;
+        this.ctx.lineWidth = 2;
+        this.ctx.fill();
+        this.ctx.stroke();
+
+        p.satellites.forEach(sat => {
+            this.ctx.beginPath();
+            this.ctx.arc(sat.x, sat.y, sat.radius, 0, Math.PI * 2);
+            this.ctx.fillStyle = "#333";
+            this.ctx.strokeStyle = p.color;
+            this.ctx.lineWidth = 3;
+            this.ctx.fill();
+            this.ctx.stroke();
+
+            this.ctx.fillStyle = "#fff";
+            this.ctx.font = "bold 14px Arial";
+            this.ctx.textAlign = "center";
+            this.ctx.textBaseline = "middle";
+            this.ctx.fillText(sat.text, sat.x, sat.y);
+        });
+    }
+
+    drawPuck() {
+        this.ctx.beginPath();
+        this.ctx.arc(this.puck.x, this.puck.y, this.puck.radius, 0, Math.PI * 2);
+        
+        if (this.puck.flashTimer > 0) {
+            this.ctx.fillStyle = "#ffff00";
+            this.ctx.shadowBlur = 30;
+            this.ctx.shadowColor = "#ffff00";
+        } else {
+            this.ctx.fillStyle = COLORS.puck;
+            this.ctx.shadowBlur = 0;
+        }
+        
+        this.ctx.fill();
+        this.ctx.shadowBlur = 0;
+
+        this.ctx.fillStyle = "#000";
+        
+        // --- フォントサイズ自動調整 ---
+        const text = this.currentWord.en;
+        let fontSize = 16;
+        if (text.length > 8) fontSize = 14;
+        if (text.length > 12) fontSize = 12;
+        if (text.length > 15) fontSize = 10;
+        
+        this.ctx.font = `bold ${fontSize}px Arial`;
+        // -----------------------------
+        
+        this.ctx.textAlign = "center";
+        this.ctx.textBaseline = "middle";
+        this.ctx.fillText(text, this.puck.x, this.puck.y);
+    }
+
+    loop(timestamp) {
+        if (!this.lastTime) this.lastTime = timestamp;
+        const dt = (timestamp - this.lastTime) / 1000;
+        this.lastTime = timestamp;
+
+        this.update(dt);
+        this.draw();
+        requestAnimationFrame(t => this.loop(t));
+    }
+}
+
+window.onload = () => new Game();
+</script>
+
+</body>
+</html>
