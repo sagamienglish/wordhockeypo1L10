@@ -68,15 +68,15 @@
             border: 4px solid #00d2ff;
             box-shadow: 0 0 30px #00d2ff;
             pointer-events: auto;
-            max-width: 80%;
+            max-width: 90%;
             display: none; /* 初期は非表示 */
-            max-height: 90vh;
+            max-height: 95vh;
             overflow-y: auto;
         }
         
         #start-screen { display: block; } /* 初期表示 */
 
-        h1 { margin: 0 0 20px; font-size: 2.5rem; color: #00d2ff; text-shadow: 0 0 10px #00d2ff; }
+        h1 { margin: 0 0 10px; font-size: 2.5rem; color: #00d2ff; text-shadow: 0 0 10px #00d2ff; }
         p { font-size: 1rem; line-height: 1.6; margin-bottom: 20px; color: #ccc; }
         .highlight { color: #ffcc00; font-weight: bold; }
         
@@ -94,6 +94,33 @@
             margin-top: 10px;
         }
         button.main-btn:active { transform: scale(0.95); }
+
+        /* 設定エリア */
+        .settings-area {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .settings-area label {
+            font-size: 1rem;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .settings-area select, .settings-area input {
+            font-size: 1rem;
+            padding: 5px;
+            border-radius: 5px;
+            border: none;
+            background: #fff;
+            color: #000;
+        }
 
         /* 勝利数表示エリア */
         .stats-area {
@@ -138,12 +165,40 @@
     <div id="ui-layer">
         <!-- スタート画面 -->
         <div id="start-screen" class="message-box">
-            <h1>Word Hockey<br><span style="font-size:0.6em">Bonus Match</span></h1>
+            <h1>Word Hockey</h1>
             <p>
-                10点先取 または 60秒で終了！<br>
                 ゴール後は<span class="highlight">早押しボーナスクイズ</span>！<br>
                 正解すると+1点！
             </p>
+
+            <!-- 設定エリア -->
+            <div class="settings-area">
+                <label>
+                    先取点:
+                    <select id="setting-score">
+                        <option value="5">5点</option>
+                        <option value="10" selected>10点</option>
+                        <option value="15">15点</option>
+                        <option value="20">20点</option>
+                    </select>
+                </label>
+                <label>
+                    制限時間:
+                    <select id="setting-time">
+                        <option value="30">30秒</option>
+                        <option value="40">40秒</option>
+                        <option value="50">50秒</option>
+                        <option value="60" selected>60秒</option>
+                        <option value="70">70秒</option>
+                        <option value="80">80秒</option>
+                        <option value="90">90秒</option>
+                        <option value="100">100秒</option>
+                        <option value="110">110秒</option>
+                        <option value="120">120秒</option>
+                    </select>
+                </label>
+            </div>
+
             <button id="start-btn" class="main-btn">GAME START</button>
 
             <!-- 勝利数記録 -->
@@ -282,11 +337,14 @@ function speakWord(text) {
     }
 }
 
-// ユーザーアクション時にダミー再生して権限を取得する
+// iOS対策: ユーザーアクション時にダミー再生して権限を確実に取得する
 function unlockAudioContext() {
     if ('speechSynthesis' in window) {
-        const uttr = new SpeechSynthesisUtterance(''); // 無音
-        uttr.volume = 0;
+        // 短い発音をさせてエンジンをウォームアップさせる
+        // iOSは無音や空文字だと無視されることがあるため、あえてスペースなどを指定
+        const uttr = new SpeechSynthesisUtterance(' '); 
+        uttr.volume = 0.1; // 完全に0だと無視される恐れがあるのでわずかに
+        uttr.rate = 10; // 一瞬で終わらせる
         window.speechSynthesis.speak(uttr);
     }
 }
@@ -348,6 +406,7 @@ class Game {
         this.state = 'START'; // START, PLAY, BONUS, GAMEOVER
         this.score = { p1: 0, p2: 0 };
         this.timeLeft = 60;
+        this.maxScore = 10; // デフォルト
         this.lastTime = 0;
         
         // 勝利数記録
@@ -425,14 +484,19 @@ class Game {
 
     startGame() {
         initAudio();
-        unlockAudioContext(); // 音声読み上げのアンロック
+        unlockAudioContext(); // 音声読み上げのアンロック(iOS対策)
         document.getElementById('start-screen').style.display = 'none';
         document.getElementById('gameover-screen').style.display = 'none';
         document.getElementById('back-to-menu-btn').style.display = 'block'; // メニューボタン表示
         
+        // 設定値の取得
+        const scoreSetting = document.getElementById('setting-score').value;
+        const timeSetting = document.getElementById('setting-time').value;
+        this.maxScore = parseInt(scoreSetting, 10);
+        this.timeLeft = parseInt(timeSetting, 10);
+
         this.state = 'PLAY';
         this.score = { p1: 0, p2: 0 };
-        this.timeLeft = 60;
         this.rallyCount = 0;
         this.lastTime = performance.now();
         
@@ -492,7 +556,16 @@ class Game {
     }
 
     pickNewWord() {
-        const target = RAW_WORD_LIST[Math.floor(Math.random() * RAW_WORD_LIST.length)];
+        let target;
+        // 前回と同じ単語が出ないようにループ（データが1個しかない場合は無限ループになるのでガード）
+        if (RAW_WORD_LIST.length > 1) {
+            do {
+                target = RAW_WORD_LIST[Math.floor(Math.random() * RAW_WORD_LIST.length)];
+            } while (this.currentWord && target.en === this.currentWord.en);
+        } else {
+             target = RAW_WORD_LIST[0];
+        }
+
         const otherWords = RAW_WORD_LIST.filter(w => w.en !== target.en);
         const shuffled = [...otherWords].sort(() => 0.5 - Math.random());
         const dummies = shuffled.slice(0, 2).map(w => w.ja);
@@ -671,7 +744,7 @@ class Game {
                 this.endGame();
                 return;
             }
-            if (this.score.p1 >= 10 || this.score.p2 >= 10) {
+            if (this.score.p1 >= this.maxScore || this.score.p2 >= this.maxScore) {
                 this.endGame();
                 return;
             }
