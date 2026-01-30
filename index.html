@@ -12,6 +12,7 @@
             font-family: 'Arial Black', sans-serif;
             overflow: hidden;
             touch-action: none; /* ブラウザのスクロール等を無効化 */
+            overscroll-behavior: none; /* バウンススクロール防止 */
             user-select: none;
             -webkit-user-select: none;
         }
@@ -26,6 +27,7 @@
 
         canvas {
             display: block;
+            touch-action: none;
         }
 
         /* UIレイヤー */
@@ -248,12 +250,43 @@ function playSound(type) {
     }
 }
 
+// 音声読み上げ関連の改良
+let availableVoices = [];
+
+function loadVoices() {
+    availableVoices = window.speechSynthesis.getVoices();
+}
+
+if ('speechSynthesis' in window) {
+    loadVoices();
+    if (window.speechSynthesis.onvoiceschanged !== undefined) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+}
+
 function speakWord(text) {
     if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
         const uttr = new SpeechSynthesisUtterance(text);
+        
+        // 英語の声を明示的に探す
+        if (availableVoices.length === 0) loadVoices();
+        const enVoice = availableVoices.find(v => v.lang.includes('en-US')) || availableVoices.find(v => v.lang.includes('en'));
+        if (enVoice) {
+            uttr.voice = enVoice;
+        }
+        
         uttr.lang = 'en-US';
         uttr.rate = 1.0;
+        window.speechSynthesis.speak(uttr);
+    }
+}
+
+// ユーザーアクション時にダミー再生して権限を取得する
+function unlockAudioContext() {
+    if ('speechSynthesis' in window) {
+        const uttr = new SpeechSynthesisUtterance(''); // 無音
+        uttr.volume = 0;
         window.speechSynthesis.speak(uttr);
     }
 }
@@ -392,6 +425,7 @@ class Game {
 
     startGame() {
         initAudio();
+        unlockAudioContext(); // 音声読み上げのアンロック
         document.getElementById('start-screen').style.display = 'none';
         document.getElementById('gameover-screen').style.display = 'none';
         document.getElementById('back-to-menu-btn').style.display = 'block'; // メニューボタン表示
@@ -555,15 +589,18 @@ class Game {
             if (this.state !== 'PLAY') return; 
             
             const margin = this.paddles[0].orbitRadius + 10;
+            // iPadのホームバー対策で下部を広めに空ける（誤操作防止）
+            const bottomSafeMargin = margin + 30; 
+
             const centerLine = this.width / 2;
             if (isLeft) {
                 const cx = Math.max(margin, Math.min(x, centerLine - margin));
-                const cy = Math.max(margin, Math.min(y, this.height - margin));
+                const cy = Math.max(margin, Math.min(y, this.height - bottomSafeMargin));
                 this.paddles[0].targetX = cx;
                 this.paddles[0].targetY = cy;
             } else {
                 const cx = Math.max(centerLine + margin, Math.min(x, this.width - margin));
-                const cy = Math.max(margin, Math.min(y, this.height - margin));
+                const cy = Math.max(margin, Math.min(y, this.height - bottomSafeMargin));
                 this.paddles[1].targetX = cx;
                 this.paddles[1].targetY = cy;
             }
