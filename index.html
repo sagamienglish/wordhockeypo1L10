@@ -429,10 +429,10 @@ class Game {
             flashTimer: 0
         };
 
-        // プレイヤー
+        // プレイヤー (速度計算用に vx, vy プロパティを追加)
         this.paddles = [
-            { x: 150, y: this.height / 2, radius: 40, orbitRadius: 65, angle: 0, color: COLORS.p1, targetX: 150, targetY: this.height / 2, satellites: [] },
-            { x: this.width - 150, y: this.height / 2, radius: 40, orbitRadius: 65, angle: Math.PI, color: COLORS.p2, targetX: this.width - 150, targetY: this.height / 2, satellites: [] }
+            { x: 150, y: this.height / 2, radius: 40, orbitRadius: 65, angle: 0, color: COLORS.p1, targetX: 150, targetY: this.height / 2, satellites: [], vx: 0, vy: 0 },
+            { x: this.width - 150, y: this.height / 2, radius: 40, orbitRadius: 65, angle: Math.PI, color: COLORS.p2, targetX: this.width - 150, targetY: this.height / 2, satellites: [], vx: 0, vy: 0 }
         ];
 
         window.addEventListener('resize', () => this.resize());
@@ -755,9 +755,17 @@ class Game {
 
         // --- PLAY中の物理演算 ---
         this.paddles.forEach(p => {
+            const prevX = p.x;
+            const prevY = p.y;
+
             const ease = 0.15;
             p.x += (p.targetX - p.x) * ease;
             p.y += (p.targetY - p.y) * ease;
+            
+            // マレットの速度（勢い）を計算
+            p.vx = p.x - prevX;
+            p.vy = p.y - prevY;
+
             p.angle += 0.005;
 
             p.satellites.forEach(sat => {
@@ -825,9 +833,9 @@ class Game {
                     if (sat.isCorrect) {
                         playSound('correct');
                         this.rallyCount++;
-                        let speedMultiplier = 1.0;
+                        
+                        // 2回に1回加速の演出（音のみ）は残す
                         if (this.rallyCount > 0 && this.rallyCount % 2 === 0) {
-                            speedMultiplier = 1.1;
                             playSound('speedup');
                         }
 
@@ -837,10 +845,19 @@ class Game {
                         this.puck.y += Math.sin(angle) * push;
 
                         const currentSpeed = Math.sqrt(this.puck.vx**2 + this.puck.vy**2);
-                        const bounceSpeed = Math.max(currentSpeed * 1.05 * speedMultiplier, 5); 
+                        const paddleSpeed = Math.sqrt(p.vx**2 + p.vy**2); // マレットの勢い
+
+                        // 新・加速計算式:
+                        // 1. 当たるごとに基本速度が 1.05倍 になる (毎回加速)
+                        // 2. さらにマレットの勢い (paddleSpeed) が加算される
+                        let newSpeed = (currentSpeed * 1.05) + (paddleSpeed * 1.5);
                         
-                        this.puck.vx = Math.cos(angle) * bounceSpeed;
-                        this.puck.vy = Math.sin(angle) * bounceSpeed;
+                        // 速度制限
+                        newSpeed = Math.max(newSpeed, 4); // 初速程度は維持
+                        newSpeed = Math.min(newSpeed, 30); // 速すぎ防止
+                        
+                        this.puck.vx = Math.cos(angle) * newSpeed;
+                        this.puck.vy = Math.sin(angle) * newSpeed;
 
                         this.puck.flashTimer = 10;
                     }
